@@ -184,7 +184,7 @@ col1, col2 = st.columns(2)
 with col1:
     if df_mnp is not None:
         st.plotly_chart(
-            crea_grafico(df_mnp, f"MNP ({int(df_mnp['Valore'].sum())})"),
+            crea_grafico(df_mnp, f"MNP ({int(df_mnp['Valore'])})"),
             use_container_width=True
         )
     else:
