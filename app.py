@@ -26,10 +26,9 @@ html, body, [class*="css"] {
 """, unsafe_allow_html=True)
 
 # ============================================
-# PALETTE COLORI PER CATEGORIA
+# PALETTE COLORI
 # ============================================
 COLORI_CATEGORIA = {
-    # MNP
     "MNP in Lavorazione": "#1E88E5",
     "MNP Da Esitare Non Scadute": "#FB8C00",
     "MNP Da Esitare ScaduteT0": "#F4511E",
@@ -38,7 +37,6 @@ COLORI_CATEGORIA = {
     "MNP KO": "#C62828",
     "MNP Scadute": "#757575",
 
-    # FAMILY
     "Family in Lavorazione": "#1E88E5",
     "Family Da Esitare": "#FB8C00",
     "Family Da Esitare Scadute": "#D84315",
@@ -79,25 +77,19 @@ def crea_grafico(df, titolo):
     return fig
 
 # ============================================
-# CARTELLA DATA (ROBUSTA CLOUD + LOCALE)
+# CARTELLA DATA
 # ============================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
 if not os.path.exists(DATA_DIR):
-    st.error(
-        "❌ Cartella **data/** non trovata.\n\n"
-        f"Percorso cercato:\n`{DATA_DIR}`"
-    )
+    st.error(f"❌ Cartella data non trovata:\n{DATA_DIR}")
     st.stop()
 
-files = sorted([
-    f for f in os.listdir(DATA_DIR)
-    if f.lower().endswith(".xlsx")
-])
+files = sorted(f for f in os.listdir(DATA_DIR) if f.lower().endswith(".xlsx"))
 
 if not files:
-    st.warning("⚠️ Nessun file Excel trovato nella cartella **data/**")
+    st.warning("⚠️ Nessun file Excel trovato")
     st.stop()
 
 file_map = {nome_mese_da_file(f): f for f in files}
@@ -105,11 +97,7 @@ file_map = {nome_mese_da_file(f): f for f in files}
 # ============================================
 # SELEZIONE MESE
 # ============================================
-mese_selezionato = st.selectbox(
-    "📅 Seleziona mese",
-    list(file_map.keys())
-)
-
+mese_selezionato = st.selectbox("📅 Seleziona mese", list(file_map.keys()))
 file_path = os.path.join(DATA_DIR, file_map[mese_selezionato])
 
 # ============================================
@@ -122,13 +110,15 @@ df_raw = pd.read_excel(
 )
 
 dati = {}
-row_idx = 0
+totali = {}
 
+row_idx = 0
 while row_idx < len(df_raw) - 2:
     titolo = df_raw.iloc[row_idx, 0]
 
     if isinstance(titolo, str) and ";" in titolo and "TOT" in titolo.upper():
         negozio, resto = titolo.split(";", 1)
+        negozio = negozio.strip()
         tipo = "MNP" if "MNP" in resto.upper() else "Family"
 
         row_cat = df_raw.iloc[row_idx + 1]
@@ -140,18 +130,27 @@ while row_idx < len(df_raw) - 2:
             cat = row_cat[col]
             val = row_val[col]
 
-            if pd.notna(cat) and pd.notna(val):
-                cat_str = str(cat).strip().lower()
-                if cat_str in ["tot", "mnp tot", "family tot", "#n/d"]:
-                    continue
-                try:
-                    categorie.append(str(cat).strip())
-                    valori.append(float(val))
-                except ValueError:
-                    pass
+            if pd.isna(cat) or pd.isna(val):
+                continue
+
+            cat_str = str(cat).strip().lower()
+
+            # intercetto i TOT
+            if cat_str in ["tot", "mnp tot", "family tot"]:
+                totali.setdefault(negozio, {})[tipo] = int(val)
+                continue
+
+            if cat_str == "#n/d":
+                continue
+
+            try:
+                categorie.append(str(cat).strip())
+                valori.append(float(val))
+            except ValueError:
+                pass
 
         if categorie:
-            dati.setdefault(negozio.strip(), {})[tipo] = pd.DataFrame({
+            dati.setdefault(negozio, {})[tipo] = pd.DataFrame({
                 "Categoria": categorie,
                 "Valore": valori
             })
@@ -163,10 +162,10 @@ while row_idx < len(df_raw) - 2:
 # ============================================
 # SELEZIONE NEGOZIO
 # ============================================
-negozio = st.selectbox(
-    "📍 Seleziona punto vendita",
-    sorted(dati.keys())
-)
+negozio = st.selectbox("📍 Seleziona punto vendita", sorted(dati.keys()))
+
+mnp_tot = totali.get(negozio, {}).get("MNP")
+family_tot = totali.get(negozio, {}).get("Family")
 
 st.markdown(
     f"<h1 style='text-align:center;'>{mese_selezionato} – {negozio}</h1>",
@@ -177,14 +176,14 @@ df_mnp = dati[negozio].get("MNP")
 df_family = dati[negozio].get("Family")
 
 # ============================================
-# LAYOUT RESPONSIVE (NATIVO STREAMLIT)
+# LAYOUT
 # ============================================
 col1, col2 = st.columns(2)
 
 with col1:
     if df_mnp is not None:
         st.plotly_chart(
-            crea_grafico(df_mnp, f"MNP ({int(df_mnp['Valore'].sum())})"),
+            crea_grafico(df_mnp, f"MNP ({mnp_tot})"),
             use_container_width=True
         )
     else:
@@ -193,7 +192,7 @@ with col1:
 with col2:
     if df_family is not None:
         st.plotly_chart(
-            crea_grafico(df_family, f"Family ({int(df_family['Valore'].sum())})"),
+            crea_grafico(df_family, f"Family ({family_tot})"),
             use_container_width=True
         )
     else:
