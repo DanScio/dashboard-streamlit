@@ -53,7 +53,12 @@ def nome_mese_da_file(filename):
     nome = nome.replace("_", " ").title()
     return f"Dashboard {nome}"
 
-def crea_grafico(df, titolo):
+def crea_grafico(df, titolo, tot):
+    df = df.copy()
+
+    # percentuale calcolata sul TOT reale
+    df["PercTot"] = df["Valore"] / tot * 100
+
     fig = px.pie(
         df,
         names="Categoria",
@@ -64,8 +69,14 @@ def crea_grafico(df, titolo):
     )
 
     fig.update_traces(
-        hovertemplate="<b>%{label}</b><br>Valore: %{value}<br>%{percent}<extra></extra>",
-        textinfo="percent+value"
+        customdata=df["PercTot"],
+        texttemplate="%{customdata:.1f}%<br>(%{value})",
+        hovertemplate=(
+            "<b>%{label}</b><br>"
+            "Valore: %{value}<br>"
+            "Percentuale su TOT: %{customdata:.1f}%"
+            "<extra></extra>"
+        )
     )
 
     fig.update_layout(
@@ -135,7 +146,7 @@ while row_idx < len(df_raw) - 2:
 
             cat_str = str(cat).strip().lower()
 
-            # intercetto i TOT
+            # intercetto il TOT ma NON lo metto nel grafico
             if cat_str in ["tot", "mnp tot", "family tot"]:
                 totali.setdefault(negozio, {})[tipo] = int(val)
                 continue
@@ -164,6 +175,9 @@ while row_idx < len(df_raw) - 2:
 # ============================================
 negozio = st.selectbox("📍 Seleziona punto vendita", sorted(dati.keys()))
 
+df_mnp = dati[negozio].get("MNP")
+df_family = dati[negozio].get("Family")
+
 mnp_tot = totali.get(negozio, {}).get("MNP")
 family_tot = totali.get(negozio, {}).get("Family")
 
@@ -172,27 +186,24 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-df_mnp = dati[negozio].get("MNP")
-df_family = dati[negozio].get("Family")
-
 # ============================================
 # LAYOUT
 # ============================================
 col1, col2 = st.columns(2)
 
 with col1:
-    if df_mnp is not None:
+    if df_mnp is not None and mnp_tot:
         st.plotly_chart(
-            crea_grafico(df_mnp, f"MNP ({mnp_tot})"),
+            crea_grafico(df_mnp, f"MNP ({mnp_tot})", mnp_tot),
             use_container_width=True
         )
     else:
         st.info("Nessun dato MNP")
 
 with col2:
-    if df_family is not None:
+    if df_family is not None and family_tot:
         st.plotly_chart(
-            crea_grafico(df_family, f"Family ({family_tot})"),
+            crea_grafico(df_family, f"Family ({family_tot})", family_tot),
             use_container_width=True
         )
     else:
