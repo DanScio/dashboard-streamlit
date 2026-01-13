@@ -55,8 +55,6 @@ def nome_mese_da_file(filename):
 
 def crea_grafico(df, titolo, tot):
     df = df.copy()
-
-    # percentuale calcolata sul TOT reale
     df["PercTot"] = df["Valore"] / tot * 100
 
     fig = px.pie(
@@ -86,6 +84,28 @@ def crea_grafico(df, titolo, tot):
     )
 
     return fig
+
+def aggrega_tutti_negozi(dati, totali, tipo):
+    df_list = []
+    tot = 0
+
+    for negozio in dati:
+        if tipo in dati[negozio]:
+            df_list.append(dati[negozio][tipo])
+
+        if tipo in totali.get(negozio, {}):
+            tot += totali[negozio][tipo]
+
+    if not df_list or tot == 0:
+        return None, None
+
+    df_tot = (
+        pd.concat(df_list)
+        .groupby("Categoria", as_index=False)["Valore"]
+        .sum()
+    )
+
+    return df_tot, tot
 
 # ============================================
 # CARTELLA DATA
@@ -146,7 +166,6 @@ while row_idx < len(df_raw) - 2:
 
             cat_str = str(cat).strip().lower()
 
-            # intercetto il TOT ma NON lo metto nel grafico
             if cat_str in ["tot", "mnp tot", "family tot"]:
                 totali.setdefault(negozio, {})[tipo] = int(val)
                 continue
@@ -173,16 +192,26 @@ while row_idx < len(df_raw) - 2:
 # ============================================
 # SELEZIONE NEGOZIO
 # ============================================
-negozio = st.selectbox("📍 Seleziona punto vendita", sorted(dati.keys()))
+opzioni_negozio = ["Tutti i negozi"] + sorted(dati.keys())
+negozio = st.selectbox("📍 Seleziona punto vendita", opzioni_negozio)
 
-df_mnp = dati[negozio].get("MNP")
-df_family = dati[negozio].get("Family")
+if negozio == "Tutti i negozi":
+    df_mnp, mnp_tot = aggrega_tutti_negozi(dati, totali, "MNP")
+    df_family, family_tot = aggrega_tutti_negozi(dati, totali, "Family")
+else:
+    df_mnp = dati[negozio].get("MNP")
+    df_family = dati[negozio].get("Family")
+    mnp_tot = totali.get(negozio, {}).get("MNP")
+    family_tot = totali.get(negozio, {}).get("Family")
 
-mnp_tot = totali.get(negozio, {}).get("MNP")
-family_tot = totali.get(negozio, {}).get("Family")
+titolo_dashboard = (
+    f"{mese_selezionato} – Tutti i negozi"
+    if negozio == "Tutti i negozi"
+    else f"{mese_selezionato} – {negozio}"
+)
 
 st.markdown(
-    f"<h1 style='text-align:center;'>{mese_selezionato} – {negozio}</h1>",
+    f"<h1 style='text-align:center;'>{titolo_dashboard}</h1>",
     unsafe_allow_html=True
 )
 
