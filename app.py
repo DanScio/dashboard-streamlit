@@ -14,6 +14,11 @@ st.set_page_config(
 )
 
 # ======================================================
+# PASSWORD ADMIN (HARDCODED)
+# ======================================================
+ADMIN_CODE = "619"   # <-- CAMBIA QUI SE VUOI
+
+# ======================================================
 # TEMA SCURO
 # ======================================================
 st.markdown("""
@@ -30,11 +35,6 @@ html, body, [class*="css"] {
 # ======================================================
 if "is_admin" not in st.session_state:
     st.session_state.is_admin = False
-
-# ======================================================
-# SECRET
-# ======================================================
-ADMIN_CODE = str(st.secrets.get("ADMIN_CODE", "")).strip()
 
 # ======================================================
 # PALETTE COLORI
@@ -107,7 +107,7 @@ def crea_grafico(df, titolo, tot):
     return fig
 
 # ======================================================
-# SIDEBAR - LOGIN + MODALITÀ
+# SIDEBAR - LOGIN + VISTA
 # ======================================================
 with st.sidebar:
     st.title("🔐 Accesso")
@@ -139,7 +139,15 @@ with st.sidebar:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
+if not os.path.exists(DATA_DIR):
+    st.error("Cartella data non trovata")
+    st.stop()
+
 files = sorted(f for f in os.listdir(DATA_DIR) if f.lower().endswith(".xlsx"))
+if not files:
+    st.warning("Nessun file Excel trovato")
+    st.stop()
+
 file_map = {nome_mese_da_file(f): f for f in files}
 
 mese_selezionato = st.selectbox("📅 Seleziona mese", list(file_map.keys()))
