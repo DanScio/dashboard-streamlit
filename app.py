@@ -26,13 +26,13 @@ html, body, [class*="css"] {
 """, unsafe_allow_html=True)
 
 # ======================================================
-# INIZIALIZZAZIONE SESSIONE
+# SESSION STATE
 # ======================================================
 if "is_admin" not in st.session_state:
     st.session_state.is_admin = False
 
 # ======================================================
-# CARICAMENTO SICURO SECRET
+# SECRET
 # ======================================================
 ADMIN_CODE = str(st.secrets.get("ADMIN_CODE", "")).strip()
 
@@ -107,14 +107,13 @@ def crea_grafico(df, titolo, tot):
     return fig
 
 # ======================================================
-# SIDEBAR - LOGIN
+# SIDEBAR - LOGIN + MODALITÀ
 # ======================================================
 with st.sidebar:
     st.title("🔐 Accesso")
 
     if not st.session_state.is_admin:
         codice = st.text_input("Codice amministratore", type="password")
-
         if st.button("Sblocca"):
             if codice.strip() == ADMIN_CODE:
                 st.session_state.is_admin = True
@@ -128,33 +127,28 @@ with st.sidebar:
             st.session_state.is_admin = False
             st.rerun()
 
+    st.divider()
+    vista = st.radio(
+        "Visualizzazione",
+        ["Singolo negozio", "Totale tutti i negozi"]
+    )
+
 # ======================================================
 # CARICAMENTO FILE
 # ======================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
-if not os.path.exists(DATA_DIR):
-    st.error("Cartella data non trovata")
-    st.stop()
-
 files = sorted(f for f in os.listdir(DATA_DIR) if f.lower().endswith(".xlsx"))
-if not files:
-    st.warning("Nessun file Excel trovato")
-    st.stop()
-
 file_map = {nome_mese_da_file(f): f for f in files}
 
 mese_selezionato = st.selectbox("📅 Seleziona mese", list(file_map.keys()))
 file_path = os.path.join(DATA_DIR, file_map[mese_selezionato])
 
-# ======================================================
-# LETTURA EXCEL
-# ======================================================
 df_raw = pd.read_excel(file_path, sheet_name="Main Per Grafico", header=None)
 
 # ======================================================
-# PARSING DATI
+# PARSING EXCEL
 # ======================================================
 dati = {}
 totali = {}
@@ -174,19 +168,12 @@ while row_idx < len(df_raw) - 2:
         categorie, valori = [], []
 
         for col in range(len(df_raw.columns)):
-            cat = row_cat[col]
-            val = row_val[col]
-
+            cat, val = row_cat[col], row_val[col]
             if pd.isna(cat) or pd.isna(val):
                 continue
 
-            cat_str = str(cat).strip().lower()
-
-            if cat_str in ["tot", "mnp tot", "family tot"]:
+            if str(cat).strip().lower() in ["tot", "mnp tot", "family tot"]:
                 totali.setdefault(negozio, {})[tipo] = int(val)
-                continue
-
-            if cat_str == "#n/d":
                 continue
 
             categorie.append(str(cat).strip())
@@ -202,48 +189,81 @@ while row_idx < len(df_raw) - 2:
         row_idx += 1
 
 # ======================================================
-# CONTENUTO PRINCIPALE
+# VISUALIZZAZIONE
 # ======================================================
-negozio = st.selectbox("📍 Seleziona punto vendita", sorted(dati.keys()))
+if vista == "Singolo negozio":
 
-df_mnp = dati[negozio].get("MNP")
-df_family = dati[negozio].get("Family")
+    negozio = st.selectbox("📍 Punto vendita", sorted(dati.keys()))
 
-mnp_tot = totali.get(negozio, {}).get("MNP")
-family_tot = totali.get(negozio, {}).get("Family")
+    st.markdown(
+        f"<h1 style='text-align:center;'>{mese_selezionato} – {negozio}</h1>",
+        unsafe_allow_html=True
+    )
 
-st.markdown(
-    f"<h1 style='text-align:center;'>{mese_selezionato} – {negozio}</h1>",
-    unsafe_allow_html=True
-)
+    col1, col2 = st.columns(2)
 
-col1, col2 = st.columns(2)
-
-with col1:
-    if df_mnp is not None and mnp_tot:
+    with col1:
         st.plotly_chart(
             crea_grafico(
-                filtra_categorie(df_mnp),
-                f"MNP ({mnp_tot})",
-                mnp_tot
+                filtra_categorie(dati[negozio]["MNP"]),
+                f"MNP ({totali[negozio]['MNP']})",
+                totali[negozio]["MNP"]
             ),
             use_container_width=True
         )
-    else:
-        st.info("Nessun dato MNP")
 
-with col2:
-    if df_family is not None and family_tot:
+    with col2:
         st.plotly_chart(
             crea_grafico(
-                filtra_categorie(df_family),
-                f"Family ({family_tot})",
-                family_tot
+                filtra_categorie(dati[negozio]["Family"]),
+                f"Family ({totali[negozio]['Family']})",
+                totali[negozio]["Family"]
             ),
             use_container_width=True
         )
-    else:
-        st.info("Nessun dato Family")
+
+else:
+    # =======================
+    # TOTALE TUTTI I NEGOZI
+    # =======================
+    st.markdown(
+        f"<h1 style='text-align:center;'>{mese_selezionato} – TOTALE</h1>",
+        unsafe_allow_html=True
+    )
+
+    def aggrega(tipo):
+        frames = []
+        totale = 0
+        for n in dati:
+            df = dati[n].get(tipo)
+            if df is not None:
+                frames.append(df)
+                totale += totali[n][tipo]
+
+        df_tot = (
+            pd.concat(frames)
+            .groupby("Categoria", as_index=False)
+            .sum()
+        )
+
+        return filtra_categorie(df_tot), totale
+
+    col1, col2 = st.columns(2)
+
+    df_mnp_tot, mnp_tot = aggrega("MNP")
+    df_fam_tot, fam_tot = aggrega("Family")
+
+    with col1:
+        st.plotly_chart(
+            crea_grafico(df_mnp_tot, f"MNP TOTALE ({mnp_tot})", mnp_tot),
+            use_container_width=True
+        )
+
+    with col2:
+        st.plotly_chart(
+            crea_grafico(df_fam_tot, f"Family TOTALE ({fam_tot})", fam_tot),
+            use_container_width=True
+        )
 
 # ======================================================
 # FOOTER
