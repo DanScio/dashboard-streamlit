@@ -14,6 +14,14 @@ st.set_page_config(
 )
 
 # ============================================
+# STATO SESSIONE
+# ============================================
+if "is_admin" not in st.session_state:
+    st.session_state.is_admin = False
+
+ADMIN_CODE = st.secrets.get("ADMIN_CODE", "")
+
+# ============================================
 # TEMA SCURO FORZATO
 # ============================================
 st.markdown("""
@@ -43,6 +51,19 @@ COLORI_CATEGORIA = {
     "Family Ok": "#2E7D32",
     "Family Ko": "#C62828",
     "Family Non Lavorate": "#757575"
+}
+
+# ============================================
+# CATEGORIE NASCOSTE PER UTENTE
+# ============================================
+CATEGORIE_NASCOSTE_UTENTE = {
+    "MNP": [
+        "MNP Da Esitare ScaduteT0",
+        "MNP Da Esitare ScaduteT1"
+    ],
+    "Family": [
+        "Family Da Esitare Scadute"
+    ]
 }
 
 # ============================================
@@ -85,16 +106,21 @@ def crea_grafico(df, titolo, tot):
 
     return fig
 
+def filtra_per_ruolo(df, tipo, is_admin):
+    if df is None or is_admin:
+        return df
+    escluse = CATEGORIE_NASCOSTE_UTENTE.get(tipo, [])
+    return df[~df["Categoria"].isin(escluse)]
+
 def aggrega_tutti_negozi(dati, totali, tipo):
     df_list = []
     tot = 0
 
-    for negozio in dati:
-        if tipo in dati[negozio]:
-            df_list.append(dati[negozio][tipo])
-
-        if tipo in totali.get(negozio, {}):
-            tot += totali[negozio][tipo]
+    for n in dati:
+        if tipo in dati[n]:
+            df_list.append(dati[n][tipo])
+        if tipo in totali.get(n, {}):
+            tot += totali[n][tipo]
 
     if not df_list or tot == 0:
         return None, None
@@ -108,92 +134,98 @@ def aggrega_tutti_negozi(dati, totali, tipo):
     return df_tot, tot
 
 # ============================================
+# ACCESSO AMMINISTRATORE
+# ============================================
+with st.expander("🔐 Accesso amministratore"):
+    codice = st.text_input("Codice admin", type="password")
+    if st.button("Sblocca"):
+        if codice == ADMIN_CODE and ADMIN_CODE:
+            st.session_state.is_admin = True
+            st.success("Accesso amministratore abilitato")
+        else:
+            st.error("Codice non valido")
+
+if st.session_state.is_admin:
+    if st.button("🔒 Disattiva modalità amministratore"):
+        st.session_state.is_admin = False
+        st.experimental_rerun()
+
+# ============================================
+# NAVIGAZIONE
+# ============================================
+pagine = ["Vista Operativa"]
+if st.session_state.is_admin:
+    pagine.append("Vista Amministratore")
+
+pagina = st.radio("🧭 Visualizzazione", pagine, horizontal=True)
+is_admin = pagina == "Vista Amministratore"
+
+# ============================================
 # CARTELLA DATA
 # ============================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
-if not os.path.exists(DATA_DIR):
-    st.error(f"❌ Cartella data non trovata:\n{DATA_DIR}")
-    st.stop()
-
 files = sorted(f for f in os.listdir(DATA_DIR) if f.lower().endswith(".xlsx"))
-
-if not files:
-    st.warning("⚠️ Nessun file Excel trovato")
-    st.stop()
-
 file_map = {nome_mese_da_file(f): f for f in files}
 
-# ============================================
-# SELEZIONE MESE
-# ============================================
-mese_selezionato = st.selectbox("📅 Seleziona mese", list(file_map.keys()))
-file_path = os.path.join(DATA_DIR, file_map[mese_selezionato])
+mese = st.selectbox("📅 Seleziona mese", list(file_map.keys()))
+file_path = os.path.join(DATA_DIR, file_map[mese])
 
 # ============================================
 # LETTURA EXCEL
 # ============================================
-df_raw = pd.read_excel(
-    file_path,
-    sheet_name="Main Per Grafico",
-    header=None
-)
+df_raw = pd.read_excel(file_path, sheet_name="Main Per Grafico", header=None)
 
 dati = {}
 totali = {}
 
-row_idx = 0
-while row_idx < len(df_raw) - 2:
-    titolo = df_raw.iloc[row_idx, 0]
+row = 0
+while row < len(df_raw) - 2:
+    titolo = df_raw.iloc[row, 0]
 
     if isinstance(titolo, str) and ";" in titolo and "TOT" in titolo.upper():
         negozio, resto = titolo.split(";", 1)
         negozio = negozio.strip()
         tipo = "MNP" if "MNP" in resto.upper() else "Family"
 
-        row_cat = df_raw.iloc[row_idx + 1]
-        row_val = df_raw.iloc[row_idx + 2]
+        row_cat = df_raw.iloc[row + 1]
+        row_val = df_raw.iloc[row + 2]
 
-        categorie, valori = [], []
+        cat, val = [], []
 
-        for col in range(len(df_raw.columns)):
-            cat = row_cat[col]
-            val = row_val[col]
-
-            if pd.isna(cat) or pd.isna(val):
+        for c in range(len(df_raw.columns)):
+            if pd.isna(row_cat[c]) or pd.isna(row_val[c]):
                 continue
 
-            cat_str = str(cat).strip().lower()
+            nome_cat = str(row_cat[c]).strip()
+            low = nome_cat.lower()
 
-            if cat_str in ["tot", "mnp tot", "family tot"]:
-                totali.setdefault(negozio, {})[tipo] = int(val)
+            if low in ["tot", "mnp tot", "family tot"]:
+                totali.setdefault(negozio, {})[tipo] = int(row_val[c])
                 continue
 
-            if cat_str == "#n/d":
+            if low == "#n/d":
                 continue
 
-            try:
-                categorie.append(str(cat).strip())
-                valori.append(float(val))
-            except ValueError:
-                pass
+            cat.append(nome_cat)
+            val.append(float(row_val[c]))
 
-        if categorie:
+        if cat:
             dati.setdefault(negozio, {})[tipo] = pd.DataFrame({
-                "Categoria": categorie,
-                "Valore": valori
+                "Categoria": cat,
+                "Valore": val
             })
 
-        row_idx += 3
+        row += 3
     else:
-        row_idx += 1
+        row += 1
 
 # ============================================
 # SELEZIONE NEGOZIO
 # ============================================
-opzioni_negozio = ["Tutti i negozi"] + sorted(dati.keys())
-negozio = st.selectbox("📍 Seleziona punto vendita", opzioni_negozio)
+opzioni = ["Tutti i negozi"] + sorted(dati.keys())
+negozio = st.selectbox("📍 Punto vendita", opzioni)
 
 if negozio == "Tutti i negozi":
     df_mnp, mnp_tot = aggrega_tutti_negozi(dati, totali, "MNP")
@@ -204,37 +236,31 @@ else:
     mnp_tot = totali.get(negozio, {}).get("MNP")
     family_tot = totali.get(negozio, {}).get("Family")
 
-titolo_dashboard = (
-    f"{mese_selezionato} – Tutti i negozi"
-    if negozio == "Tutti i negozi"
-    else f"{mese_selezionato} – {negozio}"
-)
-
-st.markdown(
-    f"<h1 style='text-align:center;'>{titolo_dashboard}</h1>",
-    unsafe_allow_html=True
-)
+df_mnp = filtra_per_ruolo(df_mnp, "MNP", is_admin)
+df_family = filtra_per_ruolo(df_family, "Family", is_admin)
 
 # ============================================
-# LAYOUT
+# TITOLO
+# ============================================
+titolo = f"{mese} – {negozio}"
+st.markdown(f"<h1 style='text-align:center;'>{titolo}</h1>", unsafe_allow_html=True)
+
+st.success("🔐 Modalità Amministratore") if is_admin else st.info("👤 Modalità Operativa")
+
+# ============================================
+# LAYOUT GRAFICI
 # ============================================
 col1, col2 = st.columns(2)
 
 with col1:
     if df_mnp is not None and mnp_tot:
-        st.plotly_chart(
-            crea_grafico(df_mnp, f"MNP ({mnp_tot})", mnp_tot),
-            use_container_width=True
-        )
+        st.plotly_chart(crea_grafico(df_mnp, f"MNP ({mnp_tot})", mnp_tot), use_container_width=True)
     else:
         st.info("Nessun dato MNP")
 
 with col2:
     if df_family is not None and family_tot:
-        st.plotly_chart(
-            crea_grafico(df_family, f"Family ({family_tot})", family_tot),
-            use_container_width=True
-        )
+        st.plotly_chart(crea_grafico(df_family, f"Family ({family_tot})", family_tot), use_container_width=True)
     else:
         st.info("Nessun dato Family")
 
