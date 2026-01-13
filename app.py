@@ -35,14 +35,14 @@ COLORI_CATEGORIA = {
     "MNP Da Esitare ScaduteT1": "#D84315",
     "MNP OK": "#2E7D32",
     "MNP KO": "#C62828",
-    "MNP Scadute": "#757575",
+    "MNP Non Lavorate": "#757575",
 
     "Family in Lavorazione": "#1E88E5",
     "Family Da Esitare": "#FB8C00",
     "Family Da Esitare Scadute": "#D84315",
     "Family Ok": "#2E7D32",
     "Family Ko": "#C62828",
-    "Family Scadute": "#757575"
+    "Family Non Lavorate": "#757575"
 }
 
 # ============================================
