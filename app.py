@@ -245,7 +245,11 @@ df_family = filtra_per_ruolo(df_family, "Family", is_admin)
 titolo = f"{mese} – {negozio}"
 st.markdown(f"<h1 style='text-align:center;'>{titolo}</h1>", unsafe_allow_html=True)
 
-st.success("🔐 Modalità Amministratore") if is_admin else st.info("👤 Modalità Operativa")
+if is_admin:
+    st.success("🔐 Modalità Amministratore")
+else:
+    st.info("👤 Modalità Operativa")
+
 
 # ============================================
 # LAYOUT GRAFICI
