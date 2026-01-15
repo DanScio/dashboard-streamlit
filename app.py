@@ -14,9 +14,9 @@ st.set_page_config(
 )
 
 # ======================================================
-# PASSWORD ADMIN (HARDCODED)
+# PASSWORD ADMIN
 # ======================================================
-ADMIN_CODE = "619"   # <-- CAMBIA QUI SE VUOI
+ADMIN_CODE = "619"
 
 # ======================================================
 # TEMA SCURO
@@ -37,9 +37,10 @@ if "is_admin" not in st.session_state:
     st.session_state.is_admin = False
 
 # ======================================================
-# PALETTE COLORI
+# PALETTE COLORI (COERENTE)
 # ======================================================
 COLORI_CATEGORIA = {
+    # MNP
     "MNP in Lavorazione": "#1E88E5",
     "MNP Da Esitare Non Scadute": "#FB8C00",
     "MNP Da Esitare ScaduteT0": "#F4511E",
@@ -48,18 +49,28 @@ COLORI_CATEGORIA = {
     "MNP KO": "#C62828",
     "MNP Non Lavorate": "#757575",
 
+    # FAMILY
     "Family in Lavorazione": "#1E88E5",
     "Family Da Esitare": "#FB8C00",
     "Family Da Esitare Scadute": "#D84315",
     "Family Ok": "#2E7D32",
     "Family Ko": "#C62828",
-    "Family Non Lavorate": "#757575"
+    "Family Non Lavorate": "#757575",
+
+    # ENERGIA
+    "Energia in Lavorazione": "#1E88E5",
+    "Energia Da Esitare": "#FB8C00",
+    "Energia Da Esitare Scadute": "#D84315",
+    "Energia Ok": "#2E7D32",
+    "Energia Ko": "#C62828",
+    "Energia Non Lavorate": "#757575",
 }
 
 CATEGORIE_NASCOSTE = [
     "MNP Da Esitare ScaduteT0",
     "MNP Da Esitare ScaduteT1",
-    "Family Da Esitare Scadute"
+    "Family Da Esitare Scadute",
+    "Energia Da Esitare Scadute"
 ]
 
 # ======================================================
@@ -76,7 +87,7 @@ def filtra_categorie(df):
 
 def crea_grafico(df, titolo, tot):
     df = df.copy()
-    df["PercTot"] = df["Valore"] / tot * 100
+    df["Perc"] = df["Valore"] / tot * 100
 
     fig = px.pie(
         df,
@@ -88,14 +99,8 @@ def crea_grafico(df, titolo, tot):
     )
 
     fig.update_traces(
-        customdata=df["PercTot"],
-        texttemplate="%{customdata:.1f}%<br>(%{value})",
-        hovertemplate=(
-            "<b>%{label}</b><br>"
-            "Valore: %{value}<br>"
-            "Percentuale: %{customdata:.1f}%"
-            "<extra></extra>"
-        )
+        texttemplate="%{percent:.1%}<br>(%{value})",
+        hovertemplate="<b>%{label}</b><br>%{value}<extra></extra>"
     )
 
     fig.update_layout(
@@ -103,11 +108,10 @@ def crea_grafico(df, titolo, tot):
         title_x=0.5,
         legend_title_text=""
     )
-
     return fig
 
 # ======================================================
-# SIDEBAR - LOGIN + VISTA
+# SIDEBAR
 # ======================================================
 with st.sidebar:
     st.title("🔐 Accesso")
@@ -139,15 +143,7 @@ with st.sidebar:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
-if not os.path.exists(DATA_DIR):
-    st.error("Cartella data non trovata")
-    st.stop()
-
 files = sorted(f for f in os.listdir(DATA_DIR) if f.lower().endswith(".xlsx"))
-if not files:
-    st.warning("Nessun file Excel trovato")
-    st.stop()
-
 file_map = {nome_mese_da_file(f): f for f in files}
 
 mese_selezionato = st.selectbox("📅 Seleziona mese", list(file_map.keys()))
@@ -156,45 +152,62 @@ file_path = os.path.join(DATA_DIR, file_map[mese_selezionato])
 df_raw = pd.read_excel(file_path, sheet_name="Main Per Grafico", header=None)
 
 # ======================================================
-# PARSING EXCEL
+# PARSING EXCEL (ROBUSTO)
 # ======================================================
 dati = {}
 totali = {}
 
-row_idx = 0
-while row_idx < len(df_raw) - 2:
-    titolo = df_raw.iloc[row_idx, 0]
+row = 0
+while row < len(df_raw) - 2:
+    titolo = df_raw.iloc[row, 0]
 
     if isinstance(titolo, str) and ";" in titolo and "TOT" in titolo.upper():
         negozio, resto = titolo.split(";", 1)
         negozio = negozio.strip()
-        tipo = "MNP" if "MNP" in resto.upper() else "Family"
 
-        row_cat = df_raw.iloc[row_idx + 1]
-        row_val = df_raw.iloc[row_idx + 2]
+        if "MNP" in resto.upper():
+            tipo = "MNP"
+        elif "FAMILY" in resto.upper():
+            tipo = "Family"
+        elif "ENERGIA" in resto.upper():
+            tipo = "Energia"
+        else:
+            row += 1
+            continue
+
+        row_cat = df_raw.iloc[row + 1]
+        row_val = df_raw.iloc[row + 2]
 
         categorie, valori = [], []
 
         for col in range(len(df_raw.columns)):
             cat, val = row_cat[col], row_val[col]
+
             if pd.isna(cat) or pd.isna(val):
                 continue
 
-            if str(cat).strip().lower() in ["tot", "mnp tot", "family tot"]:
+            if str(cat).strip().lower() in ["tot", f"{tipo.lower()} tot"]:
                 totali.setdefault(negozio, {})[tipo] = int(val)
                 continue
 
-            categorie.append(str(cat).strip())
-            valori.append(float(val))
+            if str(val).strip().upper() == "#N/D":
+                continue
 
-        dati.setdefault(negozio, {})[tipo] = pd.DataFrame({
-            "Categoria": categorie,
-            "Valore": valori
-        })
+            try:
+                categorie.append(str(cat).strip())
+                valori.append(float(val))
+            except:
+                pass
 
-        row_idx += 3
+        if categorie:
+            dati.setdefault(negozio, {})[tipo] = pd.DataFrame({
+                "Categoria": categorie,
+                "Valore": valori
+            })
+
+        row += 3
     else:
-        row_idx += 1
+        row += 1
 
 # ======================================================
 # VISUALIZZAZIONE
@@ -202,76 +215,45 @@ while row_idx < len(df_raw) - 2:
 if vista == "Singolo negozio":
 
     negozio = st.selectbox("📍 Punto vendita", sorted(dati.keys()))
+    st.markdown(f"<h1 style='text-align:center;'>{mese_selezionato} – {negozio}</h1>", unsafe_allow_html=True)
 
-    st.markdown(
-        f"<h1 style='text-align:center;'>{mese_selezionato} – {negozio}</h1>",
-        unsafe_allow_html=True
-    )
+    tipi = list(dati[negozio].keys())
+    cols = st.columns(len(tipi))
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.plotly_chart(
-            crea_grafico(
-                filtra_categorie(dati[negozio]["MNP"]),
-                f"MNP ({totali[negozio]['MNP']})",
-                totali[negozio]["MNP"]
-            ),
-            use_container_width=True
-        )
-
-    with col2:
-        st.plotly_chart(
-            crea_grafico(
-                filtra_categorie(dati[negozio]["Family"]),
-                f"Family ({totali[negozio]['Family']})",
-                totali[negozio]["Family"]
-            ),
-            use_container_width=True
-        )
+    for col, tipo in zip(cols, tipi):
+        with col:
+            df = filtra_categorie(dati[negozio][tipo])
+            tot = totali[negozio][tipo]
+            st.plotly_chart(
+                crea_grafico(df, f"{tipo} ({tot})", tot),
+                use_container_width=True
+            )
 
 else:
-    # =======================
-    # TOTALE TUTTI I NEGOZI
-    # =======================
-    st.markdown(
-        f"<h1 style='text-align:center;'>{mese_selezionato} – TOTALE</h1>",
-        unsafe_allow_html=True
-    )
+    st.markdown(f"<h1 style='text-align:center;'>{mese_selezionato} – TOTALE</h1>", unsafe_allow_html=True)
 
     def aggrega(tipo):
-        frames = []
-        totale = 0
+        frames, tot = [], 0
         for n in dati:
-            df = dati[n].get(tipo)
+            if tipo in dati[n]:
+                frames.append(dati[n][tipo])
+                tot += totali[n][tipo]
+        if not frames:
+            return None, 0
+        df = pd.concat(frames).groupby("Categoria", as_index=False).sum()
+        return filtra_categorie(df), tot
+
+    tipi = sorted({t for n in dati for t in dati[n]})
+    cols = st.columns(len(tipi))
+
+    for col, tipo in zip(cols, tipi):
+        with col:
+            df, tot = aggrega(tipo)
             if df is not None:
-                frames.append(df)
-                totale += totali[n][tipo]
-
-        df_tot = (
-            pd.concat(frames)
-            .groupby("Categoria", as_index=False)
-            .sum()
-        )
-
-        return filtra_categorie(df_tot), totale
-
-    col1, col2 = st.columns(2)
-
-    df_mnp_tot, mnp_tot = aggrega("MNP")
-    df_fam_tot, fam_tot = aggrega("Family")
-
-    with col1:
-        st.plotly_chart(
-            crea_grafico(df_mnp_tot, f"MNP TOTALE ({mnp_tot})", mnp_tot),
-            use_container_width=True
-        )
-
-    with col2:
-        st.plotly_chart(
-            crea_grafico(df_fam_tot, f"Family TOTALE ({fam_tot})", fam_tot),
-            use_container_width=True
-        )
+                st.plotly_chart(
+                    crea_grafico(df, f"{tipo} TOTALE ({tot})", tot),
+                    use_container_width=True
+                )
 
 # ======================================================
 # FOOTER
