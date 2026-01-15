@@ -173,16 +173,26 @@ while row < len(df_raw) - 2:
 
         categorie, valori = [], []
 
+        prima_colonna = True
+
         for cat, val in zip(row_cat, row_val):
             if pd.isna(cat) or pd.isna(val):
                 continue
+
+            # usa la prima colonna SOLO come totale
+            if prima_colonna:
+                prima_colonna = False
+                continue
+
             if str(val).strip().upper() == "#N/D":
                 continue
+
             try:
                 categorie.append(str(cat).strip())
                 valori.append(float(val))
             except:
                 pass
+
 
         if categorie and totale:
             tipo = categorie[0].split()[0]  # MNP / Family / Energia / altro
