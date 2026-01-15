@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import os
+import re
 
 # ======================================================
 # CONFIGURAZIONE PAGINA
@@ -37,41 +38,18 @@ if "is_admin" not in st.session_state:
     st.session_state.is_admin = False
 
 # ======================================================
-# PALETTE COLORI (COERENTE)
+# COLORI BASE PER STATO (NON PER TIPO)
 # ======================================================
-COLORI_CATEGORIA = {
-    # MNP
-    "MNP in Lavorazione": "#1E88E5",
-    "MNP Da Esitare Non Scadute": "#FB8C00",
-    "MNP Da Esitare ScaduteT0": "#F4511E",
-    "MNP Da Esitare ScaduteT1": "#D84315",
-    "MNP OK": "#2E7D32",
-    "MNP KO": "#C62828",
-    "MNP Non Lavorate": "#757575",
-
-    # FAMILY
-    "Family in Lavorazione": "#1E88E5",
-    "Family Da Esitare": "#FB8C00",
-    "Family Da Esitare Scadute": "#D84315",
-    "Family Ok": "#2E7D32",
-    "Family Ko": "#C62828",
-    "Family Non Lavorate": "#757575",
-
-    # ENERGIA
-    "Energia in Lavorazione": "#1E88E5",
-    "Energia Da Esitare": "#FB8C00",
-    "Energia Da Esitare Scadute": "#D84315",
-    "Energia Ok": "#2E7D32",
-    "Energia Ko": "#C62828",
-    "Energia Non Lavorate": "#757575",
+COLORI_STATO = {
+    "lavorazione": "#1E88E5",
+    "esitare": "#FB8C00",
+    "scadute": "#D84315",
+    "ok": "#2E7D32",
+    "ko": "#C62828",
+    "non lavorate": "#757575",
 }
 
-CATEGORIE_NASCOSTE = [
-    "MNP Da Esitare ScaduteT0",
-    "MNP Da Esitare ScaduteT1",
-    "Family Da Esitare Scadute",
-    "Energia Da Esitare Scadute"
-]
+CATEGORIE_NASCOSTE_KEYWORDS = ["scadute"]
 
 # ======================================================
 # FUNZIONI
@@ -80,10 +58,31 @@ def nome_mese_da_file(filename):
     nome = filename.replace("dashboard_", "").replace(".xlsx", "")
     return f"Dashboard {nome.replace('_', ' ').title()}"
 
-def filtra_categorie(df):
+def stato_da_categoria(nome):
+    n = nome.lower()
+    if "scadut" in n:
+        return "scadute"
+    if "esitare" in n:
+        return "esitare"
+    if "lavorazione" in n:
+        return "lavorazione"
+    if " ok" in n or n.endswith("ok"):
+        return "ok"
+    if " ko" in n or n.endswith("ko"):
+        return "ko"
+    if "non lavorate" in n:
+        return "non lavorate"
+    return "altro"
+
+def colore_categoria(cat):
+    stato = stato_da_categoria(cat)
+    return COLORI_STATO.get(stato, "#9E9E9E")
+
+def filtra_admin(df):
     if st.session_state.is_admin:
         return df
-    return df[~df["Categoria"].isin(CATEGORIE_NASCOSTE)]
+    mask = ~df["Categoria"].str.lower().str.contains("scadut", na=False)
+    return df[mask]
 
 def crea_grafico(df, titolo, tot):
     df = df.copy()
@@ -95,7 +94,7 @@ def crea_grafico(df, titolo, tot):
         values="Valore",
         title=titolo,
         color="Categoria",
-        color_discrete_map=COLORI_CATEGORIA
+        color_discrete_map={c: colore_categoria(c) for c in df["Categoria"]}
     )
 
     fig.update_traces(
@@ -132,10 +131,7 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    vista = st.radio(
-        "Visualizzazione",
-        ["Singolo negozio", "Totale tutti i negozi"]
-    )
+    vista = st.radio("Visualizzazione", ["Singolo negozio", "Totale tutti i negozi"])
 
 # ======================================================
 # CARICAMENTO FILE
@@ -146,64 +142,55 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 files = sorted(f for f in os.listdir(DATA_DIR) if f.lower().endswith(".xlsx"))
 file_map = {nome_mese_da_file(f): f for f in files}
 
-mese_selezionato = st.selectbox("📅 Seleziona mese", list(file_map.keys()))
-file_path = os.path.join(DATA_DIR, file_map[mese_selezionato])
-
-df_raw = pd.read_excel(file_path, sheet_name="Main Per Grafico", header=None)
+mese = st.selectbox("📅 Seleziona mese", list(file_map.keys()))
+df_raw = pd.read_excel(os.path.join(DATA_DIR, file_map[mese]), sheet_name="Main Per Grafico", header=None)
 
 # ======================================================
-# PARSING EXCEL (ROBUSTO)
+# PARSER DEFINITIVO
 # ======================================================
 dati = {}
 totali = {}
 
 row = 0
 while row < len(df_raw) - 2:
-    titolo = df_raw.iloc[row, 0]
+    header = df_raw.iloc[row, 0]
 
-    if isinstance(titolo, str) and ";" in titolo and "TOT" in titolo.upper():
-        negozio, resto = titolo.split(";", 1)
-        negozio = negozio.strip()
-
-        if "MNP" in resto.upper():
-            tipo = "MNP"
-        elif "FAMILY" in resto.upper():
-            tipo = "Family"
-        elif "ENERGIA" in resto.upper():
-            tipo = "Energia"
-        else:
-            row += 1
-            continue
+    if isinstance(header, str) and ";" in header:
+        negozio = header.split(";", 1)[0].strip()
 
         row_cat = df_raw.iloc[row + 1]
         row_val = df_raw.iloc[row + 2]
 
+        # totale = primo numero valido
+        totale = None
+        for v in row_val:
+            if pd.notna(v) and str(v).strip().upper() != "#N/D":
+                try:
+                    totale = int(v)
+                    break
+                except:
+                    pass
+
         categorie, valori = [], []
 
-        for col in range(len(df_raw.columns)):
-            cat, val = row_cat[col], row_val[col]
-
+        for cat, val in zip(row_cat, row_val):
             if pd.isna(cat) or pd.isna(val):
                 continue
-
-            if str(cat).strip().lower() in ["tot", f"{tipo.lower()} tot"]:
-                totali.setdefault(negozio, {})[tipo] = int(val)
-                continue
-
             if str(val).strip().upper() == "#N/D":
                 continue
-
             try:
                 categorie.append(str(cat).strip())
                 valori.append(float(val))
             except:
                 pass
 
-        if categorie:
+        if categorie and totale:
+            tipo = categorie[0].split()[0]  # MNP / Family / Energia / altro
             dati.setdefault(negozio, {})[tipo] = pd.DataFrame({
                 "Categoria": categorie,
                 "Valore": valori
             })
+            totali.setdefault(negozio, {})[tipo] = totale
 
         row += 3
     else:
@@ -215,41 +202,35 @@ while row < len(df_raw) - 2:
 if vista == "Singolo negozio":
 
     negozio = st.selectbox("📍 Punto vendita", sorted(dati.keys()))
-    st.markdown(f"<h1 style='text-align:center;'>{mese_selezionato} – {negozio}</h1>", unsafe_allow_html=True)
+    st.markdown(f"<h1 style='text-align:center;'>{mese} – {negozio}</h1>", unsafe_allow_html=True)
 
     tipi = list(dati[negozio].keys())
     cols = st.columns(len(tipi))
 
     for col, tipo in zip(cols, tipi):
         with col:
-            df = filtra_categorie(dati[negozio][tipo])
+            df = filtra_admin(dati[negozio][tipo])
             tot = totali[negozio][tipo]
-            st.plotly_chart(
-                crea_grafico(df, f"{tipo} ({tot})", tot),
-                use_container_width=True
-            )
+            st.plotly_chart(crea_grafico(df, f"{tipo} ({tot})", tot), use_container_width=True)
 
 else:
-    st.markdown(f"<h1 style='text-align:center;'>{mese_selezionato} – TOTALE</h1>", unsafe_allow_html=True)
-
-    def aggrega(tipo):
-        frames, tot = [], 0
-        for n in dati:
-            if tipo in dati[n]:
-                frames.append(dati[n][tipo])
-                tot += totali[n][tipo]
-        if not frames:
-            return None, 0
-        df = pd.concat(frames).groupby("Categoria", as_index=False).sum()
-        return filtra_categorie(df), tot
+    st.markdown(f"<h1 style='text-align:center;'>{mese} – TOTALE</h1>", unsafe_allow_html=True)
 
     tipi = sorted({t for n in dati for t in dati[n]})
     cols = st.columns(len(tipi))
 
     for col, tipo in zip(cols, tipi):
-        with col:
-            df, tot = aggrega(tipo)
-            if df is not None:
+        frames, tot = [], 0
+        for n in dati:
+            if tipo in dati[n]:
+                frames.append(dati[n][tipo])
+                tot += totali[n][tipo]
+
+        if frames:
+            df = pd.concat(frames).groupby("Categoria", as_index=False).sum()
+            df = filtra_admin(df)
+
+            with col:
                 st.plotly_chart(
                     crea_grafico(df, f"{tipo} TOTALE ({tot})", tot),
                     use_container_width=True
@@ -259,7 +240,4 @@ else:
 # FOOTER
 # ======================================================
 st.divider()
-st.markdown(
-    "<p style='text-align:center;color:gray;font-size:0.8em;'>Dashboard | 2026</p>",
-    unsafe_allow_html=True
-)
+st.markdown("<p style='text-align:center;color:gray;font-size:0.8em;'>Dashboard | 2026</p>", unsafe_allow_html=True)
